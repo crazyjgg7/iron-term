@@ -231,6 +231,93 @@ body,
   color: rgba(140, 180, 210, 0.9);
 }
 
+.hud-capture-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  cursor: crosshair;
+  z-index: 5;
+}
+
+.hud-capture-rect {
+  position: absolute;
+  border: 1px solid rgba(120, 200, 255, 0.9);
+  box-shadow: 0 0 10px rgba(120, 200, 255, 0.6);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.hud-card {
+  position: absolute;
+  background: rgba(0, 10, 30, 0.55);
+  border: 1px solid rgba(120, 200, 255, 0.7);
+  border-radius: 8px;
+  box-shadow: 0 0 14px rgba(120, 200, 255, 0.35);
+  overflow: hidden;
+  z-index: 4;
+  cursor: grab;
+}
+
+.hud-card.is-locked {
+  cursor: default;
+  border-color: rgba(120, 200, 255, 0.35);
+  opacity: 0.9;
+}
+
+.hud-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(120, 200, 255, 0.3);
+}
+
+.hud-card-label {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: #c9ecff;
+}
+
+.hud-card-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(120, 200, 255, 0.4);
+  color: #c9ecff;
+  font-size: 10px;
+  letter-spacing: 1px;
+  border-radius: 4px;
+  padding: 2px 4px;
+}
+
+.hud-card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.hud-card-button {
+  padding: 2px 6px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  border: 1px solid rgba(120, 200, 255, 0.5);
+  background: rgba(0, 0, 0, 0.3);
+  color: #a7dfff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.hud-card-button:hover {
+  border-color: rgba(120, 200, 255, 0.9);
+}
+
+.hud-card-image {
+  width: 100%;
+  height: calc(100% - 34px);
+  object-fit: cover;
+  display: block;
+  cursor: pointer;
+}
+
 .hud-alert-actions {
   display: flex;
   gap: 8px;

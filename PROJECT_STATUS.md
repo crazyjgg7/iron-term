@@ -71,6 +71,11 @@ Date: 2026-02-06
 - Click to toggle size (small ↔ large)
 - Visual style uses Iron-Term HUD line/frame aesthetics
 - Cards persist in HUD until manually removed
+- Interaction polish to consider:
+- Lock/unlock toggle should be prominent and consistent with other HUD buttons
+- Optional edge snap on drag release (default snap threshold 16px)
+- Light hover/active feedback on card controls to reduce misclicks
+- Smooth scale animation when toggling small/large
 
 ## 🔧 Known Issues / Risks
 - Web Speech API not used; Aliyun NLS requires valid keys/token
@@ -82,4 +87,3 @@ Date: 2026-02-06
 - `src/index.css` (HUD styling)
 - `package.json`
 - `vite.config.ts`
-

@@ -5,6 +5,7 @@ import { execFile } from 'node:child_process'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
 import WebSocket from 'ws'
+import { pathToFileURL } from 'node:url'
 import fsPromises from 'node:fs/promises'
 
 // The built directory structure
@@ -215,6 +216,43 @@ const logLine = async (message: string, data?: Record<string, unknown>) => {
     // ignore logging errors
   }
 }
+
+logLine('user-data-path', { path: app.getPath('userData') })
+
+const cardsDir = path.join(app.getPath('userData'), 'cards')
+const cardsJsonPath = path.join(cardsDir, 'cards.json')
+
+type CardMeta = {
+  id: string
+  filePath: string
+  fileUrl: string
+  timestamp: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  locked: boolean
+  size: 'small' | 'large'
+}
+
+const loadCards = async (): Promise<CardMeta[]> => {
+  try {
+    const raw = await fsPromises.readFile(cardsJsonPath, 'utf8')
+    return JSON.parse(raw) as CardMeta[]
+  } catch {
+    return []
+  }
+}
+
+const saveCards = async (cards: CardMeta[]) => {
+  await fsPromises.mkdir(cardsDir, { recursive: true })
+  await fsPromises.writeFile(cardsJsonPath, JSON.stringify(cards, null, 2), 'utf8')
+}
+
+ipcMain.on('cards-debug', (_event, payload: Record<string, unknown>) => {
+  logLine('cards-debug', payload)
+})
 
 const getCpuUsage = () => {
   const snapshot = os.cpus()
@@ -477,6 +515,9 @@ function createWindow() {
     },
   })
 
+  const preloadPath = path.join(__dirname, 'preload.js')
+  logLine('preload-path', { path: preloadPath, exists: fs.existsSync(preloadPath) })
+
   win.on('closed', () => {
     logLine('main-window-closed')
   })
@@ -512,6 +553,10 @@ function createWindow() {
 
   ipcMain.on('hud-toggle', () => {
     win?.webContents.send('hud-toggle-request')
+  })
+
+  ipcMain.on('preload-ready', (_event, payload: Record<string, unknown>) => {
+    logLine('preload-ready', payload)
   })
 
   ipcMain.on('tmux-send', (_event, payload: { keys: string[]; special?: string }) => {
@@ -562,6 +607,121 @@ function createWindow() {
 
   ipcMain.handle('tmux-logs', async (_event, lines: number) => {
     return fetchTmuxLogs(lines)
+  })
+
+  ipcMain.handle('display-info', async (_event, point: { x: number; y: number }) => {
+    try {
+      const target = screen.getDisplayNearestPoint({ x: point.x, y: point.y })
+      return {
+        id: target.id,
+        bounds: target.bounds,
+        size: target.size,
+        scaleFactor: target.scaleFactor,
+      }
+    } catch (error) {
+      logLine('display-info-error', { message: (error as Error).message })
+      return null
+    }
+  })
+
+  ipcMain.handle('cards-load', async () => {
+    return loadCards()
+  })
+
+  ipcMain.handle('cards-save', async (_event, payload: { dataUrl: string; label: string; width: number; height: number }) => {
+    const { dataUrl, label, width, height } = payload
+    logLine('cards-save-start', { size: dataUrl?.length ?? 0, label, width, height })
+    const id = crypto.randomUUID().replace(/-/g, '')
+    const timestamp = new Date().toISOString()
+    const filePath = path.join(cardsDir, `${timestamp.replace(/[:.]/g, '-')}-${id}.png`)
+    const base64 = dataUrl.split(',')[1] || ''
+    const buffer = Buffer.from(base64, 'base64')
+
+    await fsPromises.mkdir(cardsDir, { recursive: true })
+    await fsPromises.writeFile(filePath, buffer)
+
+    const fileUrl = pathToFileURL(filePath).toString()
+    const card: CardMeta = {
+      id,
+      filePath,
+      fileUrl,
+      timestamp,
+      label,
+      x: 80,
+      y: 120,
+      width,
+      height,
+      locked: false,
+      size: 'small',
+    }
+
+    const cards = await loadCards()
+    const next = [card, ...cards].slice(0, 20)
+    await saveCards(next)
+    logLine('cards-save-ok', { filePath, count: next.length })
+    return next
+  })
+
+  ipcMain.handle('cards-capture', async (_event, payload: { rect: { x: number; y: number; w: number; h: number }; label: string; width: number; height: number }) => {
+    const { rect, label, width, height } = payload
+    const id = crypto.randomUUID().replace(/-/g, '')
+    const timestamp = new Date().toISOString()
+    const filePath = path.join(cardsDir, `${timestamp.replace(/[:.]/g, '-')}-${id}.png`)
+    await fsPromises.mkdir(cardsDir, { recursive: true })
+    const x = Math.round(rect.x)
+    const y = Math.round(rect.y)
+    const w = Math.round(rect.w)
+    const h = Math.round(rect.h)
+    logLine('cards-capture-start', { x, y, w, h })
+    await new Promise<void>((resolve, reject) => {
+      execFile('screencapture', ['-x', '-R', `${x},${y},${w},${h}`, filePath], (error) => {
+        if (error) {
+          logLine('cards-capture-error', { message: error.message })
+          reject(error)
+          return
+        }
+        resolve()
+      })
+    })
+    const fileUrl = pathToFileURL(filePath).toString()
+    const card: CardMeta = {
+      id,
+      filePath,
+      fileUrl,
+      timestamp,
+      label,
+      x: 80,
+      y: 120,
+      width,
+      height,
+      locked: false,
+      size: 'small',
+    }
+    const cards = await loadCards()
+    const next = [card, ...cards].slice(0, 20)
+    await saveCards(next)
+    logLine('cards-capture-ok', { filePath, count: next.length })
+    return next
+  })
+
+  ipcMain.handle('cards-update', async (_event, cards: CardMeta[]) => {
+    await saveCards(cards)
+    return true
+  })
+
+  ipcMain.handle('cards-delete', async (_event, id: string) => {
+    const cards = await loadCards()
+    const target = cards.find((card) => card.id === id)
+    if (target) {
+      try {
+        await fsPromises.unlink(target.filePath)
+      } catch {
+        // ignore missing file
+      }
+    }
+    const next = cards.filter((card) => card.id !== id)
+    await saveCards(next)
+    return next
   })
 
   ipcMain.handle('asr-start', async (_event, sampleRate: number) => {

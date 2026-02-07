@@ -53,6 +53,19 @@ type HudEvent =
   | { type: 'tmux-status'; status: 'offline' | 'monitoring' | 'error' }
   | { type: 'telemetry'; payload: { cpu: number; mem: number; load: number } }
 
+type ScreenshotCard = {
+  id: string
+  fileUrl: string
+  timestamp: string
+  label: string
+  x: number
+  y: number
+  width: number
+  height: number
+  locked: boolean
+  size: 'small' | 'large'
+}
+
 function HudOverlay({
   layoutConfig,
   hudInteractive,
@@ -90,11 +103,22 @@ function HudOverlay({
   const [voiceFinal, setVoiceFinal] = useState('')
   const [voicePreview, setVoicePreview] = useState('')
   const [voiceStatus, setVoiceStatus] = useState<string | null>(null)
-  const voiceRef = useRef<any>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
   const lastFinalRef = useRef<string>('')
+  const [cards, setCards] = useState<ScreenshotCard[]>([])
+  const [captureMode, setCaptureMode] = useState(false)
+  const [selectRect, setSelectRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const dragOffsetRef = useRef<{ x: number; y: number } | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+
+  const normalizeCards = (list: any[]): ScreenshotCard[] =>
+    list.map((card) => ({
+      ...card,
+      size: card.size === 'large' ? 'large' : 'small',
+    }))
   // Terminal stream input state (interactive HUD terminal).
   const [captureInput, setCaptureInput] = useState(false)
   const [inputLine, setInputLine] = useState('')
@@ -565,6 +589,164 @@ function HudOverlay({
     }
   }, [ipcRenderer])
 
+  useEffect(() => {
+  const load = async () => {
+      const list = await ipcRenderer.invoke('cards-load')
+      setCards(Array.isArray(list) ? normalizeCards(list) : [])
+    }
+    load()
+  }, [ipcRenderer])
+
+  const persistCards = async (next: ScreenshotCard[]) => {
+    setCards(next)
+    await ipcRenderer.invoke('cards-update', next)
+  }
+
+  const handleCardDelete = async (id: string) => {
+    const next = await ipcRenderer.invoke('cards-delete', id)
+    setCards(Array.isArray(next) ? normalizeCards(next) : [])
+  }
+
+  const handleCardToggleLock = async (id: string) => {
+    const next: ScreenshotCard[] = cards.map((card) =>
+      card.id === id ? { ...card, locked: !card.locked } : card,
+    )
+    await persistCards(next)
+  }
+
+  const handleCardToggleSize = async (id: string) => {
+    const next: ScreenshotCard[] = cards.map((card) =>
+      card.id === id
+        ? {
+            ...card,
+            size: card.size === 'small' ? 'large' : 'small',
+          }
+        : card,
+    )
+    await persistCards(next)
+  }
+
+  const handleCardLabelUpdate = async (id: string, label: string) => {
+    const next: ScreenshotCard[] = cards.map((card) => (card.id === id ? { ...card, label } : card))
+    setEditingId(null)
+    await persistCards(next)
+  }
+
+  const handleCardDragStart = (id: string, event: React.PointerEvent) => {
+    const card = cards.find((item) => item.id === id)
+    if (!card || card.locked) return
+    setDragId(id)
+    dragOffsetRef.current = {
+      x: event.clientX - card.x,
+      y: event.clientY - card.y,
+    }
+  }
+
+  const handleCardDragMove = (event: PointerEvent) => {
+    if (!dragId || !dragOffsetRef.current) return
+    const offset = dragOffsetRef.current
+    const next = cards.map((card) =>
+      card.id === dragId
+        ? {
+            ...card,
+            x: event.clientX - offset.x,
+            y: event.clientY - offset.y,
+          }
+        : card,
+    )
+    setCards(next)
+  }
+
+  const handleCardDragEnd = async () => {
+    if (!dragId) return
+    const snap = 16
+    const width = window.innerWidth
+    const height = window.innerHeight
+    const next = cards.map((card) => {
+      if (card.id !== dragId) return card
+      const sizeW = card.size === 'small' ? 180 : 420
+      const sizeH = card.size === 'small' ? 120 : 280
+      let x = card.x
+      let y = card.y
+      if (x < snap) x = 0
+      if (y < snap) y = 0
+      if (width - (x + sizeW) < snap) x = width - sizeW
+      if (height - (y + sizeH) < snap) y = height - sizeH
+      return { ...card, x, y }
+    })
+    setDragId(null)
+    dragOffsetRef.current = null
+    await persistCards(next)
+  }
+
+  useEffect(() => {
+    window.addEventListener('pointermove', handleCardDragMove)
+    window.addEventListener('pointerup', handleCardDragEnd)
+    return () => {
+      window.removeEventListener('pointermove', handleCardDragMove)
+      window.removeEventListener('pointerup', handleCardDragEnd)
+    }
+  })
+
+  const startCapture = () => {
+    if (!hudInteractive) return
+    setCaptureMode(true)
+    setSelectRect(null)
+  }
+
+  const captureScreen = async (rect: { x: number; y: number; w: number; h: number }) => {
+    try {
+      ipcRenderer.send('cards-debug', { step: 'capture-start', rect })
+      const label = new Date().toLocaleString()
+      const absRect = {
+        x: window.screenX + rect.x,
+        y: window.screenY + rect.y,
+        w: rect.w,
+        h: rect.h,
+      }
+      const next = await ipcRenderer.invoke('cards-capture', { rect: absRect, label, width: 180, height: 120 })
+      setCards(Array.isArray(next) ? normalizeCards(next) : [])
+      ipcRenderer.send('cards-debug', { step: 'cards-saved', count: Array.isArray(next) ? next.length : 0 })
+    } catch (error) {
+      ipcRenderer.send('cards-debug', { step: 'capture-error', message: (error as Error).message })
+    }
+  }
+
+  const handleCaptureMouseDown = (event: React.MouseEvent) => {
+    const startX = event.clientX
+    const startY = event.clientY
+    setSelectRect({ x: startX, y: startY, w: 0, h: 0 })
+  }
+
+  const handleCaptureMouseMove = (event: React.MouseEvent) => {
+    if (!selectRect) return
+    const w = event.clientX - selectRect.x
+    const h = event.clientY - selectRect.y
+    setSelectRect({
+      x: selectRect.x,
+      y: selectRect.y,
+      w,
+      h,
+    })
+  }
+
+  const handleCaptureMouseUp = async () => {
+    if (!selectRect) {
+      setCaptureMode(false)
+      return
+    }
+    const rect = {
+      x: Math.min(selectRect.x, selectRect.x + selectRect.w),
+      y: Math.min(selectRect.y, selectRect.y + selectRect.h),
+      w: Math.abs(selectRect.w),
+      h: Math.abs(selectRect.h),
+    }
+    setCaptureMode(false)
+    setSelectRect(null)
+    if (rect.w < 10 || rect.h < 10) return
+    await captureScreen(rect)
+  }
+
   const handleVoiceCheck = async () => {
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -727,6 +909,11 @@ function HudOverlay({
               {line}
             </div>
           ))}
+          {panel.id === 'nav' && (
+            <button className="hud-demo-button" type="button" onClick={startCapture}>
+              SCREENSHOT
+            </button>
+          )}
           {panel.id === 'nav' && voiceVisible && (
             <div className={`hud-voice-panel ${voiceListening ? 'is-listening' : ''}`}>
               <div className="hud-voice-title">VOICE COMMAND</div>
@@ -763,6 +950,74 @@ function HudOverlay({
           )}
         </div>
       ))}
+
+      {cards.map((card) => {
+        const width = card.size === 'small' ? 180 : 420
+        const height = card.size === 'small' ? 120 : 280
+        return (
+          <div
+            className={`hud-card ${card.locked ? 'is-locked' : ''}`}
+            key={card.id}
+            style={{ left: card.x, top: card.y, width, height }}
+            onPointerDown={(event) => handleCardDragStart(card.id, event)}
+          >
+            <div className="hud-card-header">
+              {editingId === card.id ? (
+                <input
+                  className="hud-card-input"
+                  defaultValue={card.label || card.timestamp}
+                  onBlur={(event) => handleCardLabelUpdate(card.id, event.target.value)}
+                />
+              ) : (
+                <div
+                  className="hud-card-label"
+                  onContextMenu={(event) => {
+                    event.preventDefault()
+                    setEditingId(card.id)
+                  }}
+                >
+                  {card.label || card.timestamp}
+                </div>
+              )}
+              <div className="hud-card-actions">
+                <button className="hud-card-button" type="button" onClick={() => handleCardToggleLock(card.id)}>
+                  {card.locked ? 'UNLOCK' : 'LOCK'}
+                </button>
+                <button className="hud-card-button" type="button" onClick={() => handleCardDelete(card.id)}>
+                  DELETE
+                </button>
+              </div>
+            </div>
+            <img
+              className="hud-card-image"
+              src={card.fileUrl}
+              alt="capture"
+              onClick={() => handleCardToggleSize(card.id)}
+            />
+          </div>
+        )
+      })}
+
+      {captureMode && (
+        <div
+          className="hud-capture-overlay"
+          onMouseDown={handleCaptureMouseDown}
+          onMouseMove={handleCaptureMouseMove}
+          onMouseUp={handleCaptureMouseUp}
+        >
+          {selectRect && (
+            <div
+              className="hud-capture-rect"
+              style={{
+                left: Math.min(selectRect.x, selectRect.x + selectRect.w),
+                top: Math.min(selectRect.y, selectRect.y + selectRect.h),
+                width: Math.abs(selectRect.w),
+                height: Math.abs(selectRect.h),
+              }}
+            />
+          )}
+        </div>
+      )}
 
     </div>
   )
