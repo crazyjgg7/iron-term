@@ -66,14 +66,25 @@ type ScreenshotCard = {
   size: 'small' | 'large'
 }
 
+type AppProxyCard = {
+  id: string
+  fileUrl: string
+  label: string
+  appName: string
+  x: number
+  y: number
+}
+
 function HudOverlay({
   layoutConfig,
   hudInteractive,
   onToggleHud,
+  onSetHudInteractive,
 }: {
   layoutConfig: HudLayoutConfig
   hudInteractive: boolean
   onToggleHud: () => void
+  onSetHudInteractive: (value: boolean) => void
 }) {
   const { ipcRenderer } = window.require('electron')
   const os = window.require('os')
@@ -113,6 +124,15 @@ function HudOverlay({
   const [dragId, setDragId] = useState<string | null>(null)
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [appPickerVisible, setAppPickerVisible] = useState(false)
+  const [appList, setAppList] = useState<{ name: string; bundleId: string }[]>([])
+  const [appWindows, setAppWindows] = useState<{ appName: string; title: string; id: string; x?: string; y?: string; w?: string; h?: string; displayIndex?: string; displayX?: string; displayY?: string; displayW?: string; displayH?: string }[]>([])
+  const [selectedApp, setSelectedApp] = useState<string | null>(null)
+  const [appCards, setAppCards] = useState<AppProxyCard[]>([])
+  const [activeAppCardId, setActiveAppCardId] = useState<string | null>(null)
+  const [appDragId, setAppDragId] = useState<string | null>(null)
+  const appDragOffsetRef = useRef<{ x: number; y: number } | null>(null)
+  const appDragFrameRef = useRef<number | null>(null)
 
   const normalizeCards = (list: any[]): ScreenshotCard[] =>
     list.map((card) => ({
@@ -149,6 +169,108 @@ function HudOverlay({
     setAlertVisible(true)
     setAlertActive(true)
     window.setTimeout(() => setAlertActive(false), 1200)
+  }
+
+  const openAppPicker = async () => {
+    const result = await ipcRenderer.invoke('app-window-list')
+    setAppList(Array.isArray(result?.apps) ? result.apps : [])
+    setAppWindows(Array.isArray(result?.windows) ? result.windows : [])
+    setAppPickerVisible(true)
+    setSelectedApp(null)
+    onSetHudInteractive(true)
+    ipcRenderer.send('set-ignore-mouse-events', false)
+  }
+
+  const closeAppPicker = () => {
+    setAppPickerVisible(false)
+    setSelectedApp(null)
+    setAppCards([])
+    setActiveAppCardId(null)
+    ipcRenderer.invoke('app-cards-clear')
+  }
+
+  const handleAppSelect = (name: string) => {
+    setSelectedApp(name)
+  }
+
+  const handleWindowCapture = async (win: { appName: string; title: string; id: string; x?: string; y?: string; w?: string; h?: string; displayIndex?: string; displayX?: string; displayY?: string; displayW?: string; displayH?: string }) => {
+    ipcRenderer.send('cards-debug', {
+      step: 'window-capture-click',
+      appName: win.appName,
+      title: win.title,
+      id: win.id,
+      x: win.x,
+      y: win.y,
+      w: win.w,
+      h: win.h,
+    })
+    if (!win.id) {
+      ipcRenderer.send('cards-debug', { step: 'window-capture-missing-id', title: win.title, appName: win.appName })
+      return
+    }
+    const label = `${win.appName}: ${win.title || 'Untitled'}`
+    const rect = win.x && win.y && win.w && win.h
+      ? { x: Number(win.x), y: Number(win.y), w: Number(win.w), h: Number(win.h) }
+      : undefined
+    const display = win.displayIndex && win.displayX && win.displayY && win.displayW && win.displayH
+      ? {
+          index: Number(win.displayIndex),
+          x: Number(win.displayX),
+          y: Number(win.displayY),
+          w: Number(win.displayW),
+          h: Number(win.displayH),
+        }
+      : undefined
+    const result = await ipcRenderer.invoke('window-capture-temp', { windowId: win.id, label, rect, display })
+    if (result?.fileUrl) {
+      const next = [{ id: result.id, fileUrl: result.fileUrl, label, appName: win.appName, x: 0, y: 0 }, ...appCards]
+      setAppCards(next)
+      setActiveAppCardId(result.id)
+    }
+  }
+
+  const handleAppCardToggle = (id: string) => {
+    setActiveAppCardId((prev) => (prev === id ? null : id))
+  }
+
+  const handleAppCardDragStart = (id: string, event: React.PointerEvent) => {
+    const card = appCards.find((item) => item.id === id)
+    if (!card) return
+    if (activeAppCardId === id) return
+    setActiveAppCardId(id)
+    setAppDragId(id)
+    appDragOffsetRef.current = {
+      x: event.clientX - card.x,
+      y: event.clientY - card.y,
+    }
+    if (event.currentTarget instanceof HTMLElement) {
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+  }
+
+  const handleAppCardDragMove = (event: PointerEvent) => {
+    if (!appDragId || !appDragOffsetRef.current) return
+    const offset = appDragOffsetRef.current
+    if (appDragFrameRef.current) return
+    appDragFrameRef.current = window.requestAnimationFrame(() => {
+      const next = appCards.map((card) =>
+        card.id === appDragId
+          ? {
+              ...card,
+              x: event.clientX - offset.x,
+              y: event.clientY - offset.y,
+            }
+          : card,
+      )
+      setAppCards(next)
+      appDragFrameRef.current = null
+    })
+  }
+
+  const handleAppCardDragEnd = () => {
+    if (!appDragId) return
+    setAppDragId(null)
+    appDragOffsetRef.current = null
   }
 
   const handleAlertRetry = () => {
@@ -682,9 +804,13 @@ function HudOverlay({
   useEffect(() => {
     window.addEventListener('pointermove', handleCardDragMove)
     window.addEventListener('pointerup', handleCardDragEnd)
+    window.addEventListener('pointermove', handleAppCardDragMove)
+    window.addEventListener('pointerup', handleAppCardDragEnd)
     return () => {
       window.removeEventListener('pointermove', handleCardDragMove)
       window.removeEventListener('pointerup', handleCardDragEnd)
+      window.removeEventListener('pointermove', handleAppCardDragMove)
+      window.removeEventListener('pointerup', handleAppCardDragEnd)
     }
   })
 
@@ -914,6 +1040,11 @@ function HudOverlay({
               SCREENSHOT
             </button>
           )}
+          {panel.id === 'nav' && (
+            <button className="hud-demo-button" type="button" onClick={openAppPicker}>
+              APP SWITCH
+            </button>
+          )}
           {panel.id === 'nav' && voiceVisible && (
             <div className={`hud-voice-panel ${voiceListening ? 'is-listening' : ''}`}>
               <div className="hud-voice-title">VOICE COMMAND</div>
@@ -954,9 +1085,10 @@ function HudOverlay({
       {cards.map((card) => {
         const width = card.size === 'small' ? 180 : 420
         const height = card.size === 'small' ? 120 : 280
+        const isDragging = dragId === card.id
         return (
           <div
-            className={`hud-card ${card.locked ? 'is-locked' : ''}`}
+            className={`hud-card ${card.locked ? 'is-locked' : ''} ${isDragging ? 'is-dragging' : ''}`}
             key={card.id}
             style={{ left: card.x, top: card.y, width, height }}
             onPointerDown={(event) => handleCardDragStart(card.id, event)}
@@ -979,6 +1111,7 @@ function HudOverlay({
                   {card.label || card.timestamp}
                 </div>
               )}
+              {card.locked && <div className="hud-card-lock">LOCKED</div>}
               <div className="hud-card-actions">
                 <button className="hud-card-button" type="button" onClick={() => handleCardToggleLock(card.id)}>
                   {card.locked ? 'UNLOCK' : 'LOCK'}
@@ -997,6 +1130,79 @@ function HudOverlay({
           </div>
         )
       })}
+
+      {appPickerVisible && (
+        <div className="hud-app-picker">
+          <div className="hud-app-picker-header">
+            <div className="hud-title">APP SWITCH</div>
+            <button className="hud-app-close" type="button" onClick={closeAppPicker}>
+              CLOSE
+            </button>
+          </div>
+          <div className="hud-app-strip">
+            {appList.length === 0 && <div className="hud-app-empty">No running apps</div>}
+            {appList.map((app) => (
+              <button
+                className={`hud-app-card ${selectedApp === app.name ? 'is-active' : ''}`}
+                key={app.bundleId}
+                type="button"
+                onClick={() => handleAppSelect(app.name)}
+              >
+                <div className="hud-app-icon">●</div>
+                <div className="hud-app-name">{app.name}</div>
+              </button>
+            ))}
+          </div>
+          {appWindows.length > 0 && (
+            <div className="hud-app-windows">
+              {(selectedApp ? appWindows.filter((win) => win.appName === selectedApp) : appWindows)
+                .slice(0, 8)
+                .map((win, index) => (
+                  <button
+                    className="hud-app-window"
+                    key={`${win.appName}-${win.title}-${win.id}-${index}`}
+                    type="button"
+                    onClick={() => handleWindowCapture(win)}
+                  >
+                    {win.appName}: {win.title || 'Untitled'}
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {appPickerVisible && appCards.length > 0 && (
+        <div className="hud-app-stack">
+          {appCards.slice(0, 5).map((card, index) => {
+            const isActive = activeAppCardId === card.id
+            const isDragging = appDragId === card.id
+            return (
+              <div
+                className={`hud-app-proxy ${isActive ? 'is-active' : ''} ${isDragging ? 'is-dragging' : ''}`}
+                key={card.id}
+                style={{
+                  ['--stack-x' as never]: `${index * 18}px`,
+                  ['--stack-y' as never]: `${index * 6}px`,
+                  ['--card-x' as never]: `${card.x}px`,
+                  ['--card-y' as never]: `${card.y}px`,
+                }}
+              >
+                <div
+                  className="hud-app-proxy-grab"
+                  onPointerDown={(event) => handleAppCardDragStart(card.id, event)}
+                  onClick={() => handleAppCardToggle(card.id)}
+                >
+                  {card.appName}
+                </div>
+                <button className="hud-app-proxy-body" type="button" onClick={() => handleAppCardToggle(card.id)}>
+                  <img src={card.fileUrl} alt={card.label} draggable={false} />
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {captureMode && (
         <div
@@ -1131,7 +1337,12 @@ function App() {
 
       {/* 2D UI Layer (Interactive) */}
       <div className={`layer-ui ${layoutConfig.modeClass}`}>
-        <HudOverlay layoutConfig={layoutConfig} hudInteractive={hudInteractive} onToggleHud={() => setHudInteractive((prev) => !prev)} />
+        <HudOverlay
+          layoutConfig={layoutConfig}
+          hudInteractive={hudInteractive}
+          onToggleHud={() => setHudInteractive((prev) => !prev)}
+          onSetHudInteractive={setHudInteractive}
+        />
         {layoutConfig.showCenter && (
           <div className="hud-center">
             <div className="hud-center-ring" />

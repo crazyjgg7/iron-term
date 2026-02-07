@@ -206,6 +206,17 @@ const stopAsrSession = () => {
 }
 const logPath = path.join(process.cwd(), 'logs', 'iron-term.log')
 
+const execFileAsync = (command: string, args: string[] = []) =>
+  new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+    execFile(command, args, (error, stdout, stderr) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve({ stdout: String(stdout), stderr: String(stderr) })
+    })
+  })
+
 const logLine = async (message: string, data?: Record<string, unknown>) => {
   const payload = data ? ` ${JSON.stringify(data)}` : ''
   const line = `[${new Date().toISOString()}] ${message}${payload}\n`
@@ -221,6 +232,7 @@ logLine('user-data-path', { path: app.getPath('userData') })
 
 const cardsDir = path.join(app.getPath('userData'), 'cards')
 const cardsJsonPath = path.join(cardsDir, 'cards.json')
+const appCardsDir = path.join(app.getPath('userData'), 'app_cards')
 
 type CardMeta = {
   id: string
@@ -702,6 +714,186 @@ function createWindow() {
     await saveCards(next)
     logLine('cards-capture-ok', { filePath, count: next.length })
     return next
+  })
+
+  ipcMain.handle('window-capture', async (_event, payload: { windowId: string; label: string; width: number; height: number; rect?: { x: number; y: number; w: number; h: number }; display?: { index: number; x: number; y: number; w: number; h: number } }) => {
+    const { windowId, label, width, height, rect, display } = payload
+    const id = crypto.randomUUID().replace(/-/g, '')
+    const timestamp = new Date().toISOString()
+    const filePath = path.join(cardsDir, `${timestamp.replace(/[:.]/g, '-')}-${id}.png`)
+    await fsPromises.mkdir(cardsDir, { recursive: true })
+    logLine('window-capture-request', { windowId, label, rect })
+    logLine('window-capture-start', { windowId, label })
+    const captureWithId = () =>
+      new Promise<void>((resolve, reject) => {
+        execFile('screencapture', ['-x', '-l', String(windowId), filePath], (error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+    const captureWithRect = () =>
+      new Promise<void>((resolve, reject) => {
+        if (!rect) {
+          reject(new Error('missing rect'))
+          return
+        }
+        let { x, y, w, h } = rect
+        const args = ['-x']
+        if (display) {
+          const localX = x - display.x
+          const localY = y - display.y
+          const localTopY = display.h - localY - h
+          x = localX
+          y = localTopY
+          args.push('-D', String(display.index))
+        }
+        args.push('-R', `${x},${y},${w},${h}`, filePath)
+        execFile('screencapture', args, (error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+    try {
+      await captureWithId()
+    } catch (error) {
+      logLine('window-capture-id-failed', { message: (error as Error).message, windowId })
+      try {
+        await captureWithRect()
+      } catch (rectError) {
+        logLine('window-capture-error', { message: (rectError as Error).message, windowId })
+        throw rectError
+      }
+    }
+    const fileUrl = pathToFileURL(filePath).toString()
+    const card: CardMeta = {
+      id,
+      filePath,
+      fileUrl,
+      timestamp,
+      label,
+      x: 120,
+      y: 140,
+      width,
+      height,
+      locked: false,
+      size: 'small',
+    }
+    const cards = await loadCards()
+    const next = [card, ...cards].slice(0, 20)
+    await saveCards(next)
+    logLine('window-capture-ok', { filePath, count: next.length })
+    return next
+  })
+
+  ipcMain.handle('window-capture-temp', async (_event, payload: { windowId: string; label: string; rect?: { x: number; y: number; w: number; h: number }; display?: { index: number; x: number; y: number; w: number; h: number } }) => {
+    const { windowId, label, rect, display } = payload
+    const id = crypto.randomUUID().replace(/-/g, '')
+    const timestamp = new Date().toISOString()
+    const filePath = path.join(appCardsDir, `${timestamp.replace(/[:.]/g, '-')}-${id}.png`)
+    await fsPromises.mkdir(appCardsDir, { recursive: true })
+    logLine('window-capture-temp-start', { windowId, label })
+    const captureWithId = () =>
+      new Promise<void>((resolve, reject) => {
+        execFile('screencapture', ['-x', '-l', String(windowId), filePath], (error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+    const captureWithRect = () =>
+      new Promise<void>((resolve, reject) => {
+        if (!rect) {
+          reject(new Error('missing rect'))
+          return
+        }
+        let { x, y, w, h } = rect
+        const args = ['-x']
+        if (display) {
+          const localX = x - display.x
+          const localY = y - display.y
+          const localTopY = display.h - localY - h
+          x = localX
+          y = localTopY
+          args.push('-D', String(display.index))
+        }
+        args.push('-R', `${x},${y},${w},${h}`, filePath)
+        execFile('screencapture', args, (error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+    try {
+      await captureWithId()
+    } catch (error) {
+      logLine('window-capture-temp-id-failed', { message: (error as Error).message, windowId })
+      await captureWithRect()
+    }
+    const fileUrl = pathToFileURL(filePath).toString()
+    logLine('window-capture-temp-ok', { filePath })
+    return { id, fileUrl, label }
+  })
+
+  ipcMain.handle('app-cards-clear', async () => {
+    try {
+      const files = await fsPromises.readdir(appCardsDir)
+      await Promise.all(
+        files.map((file) => fsPromises.unlink(path.join(appCardsDir, file)).catch(() => undefined)),
+      )
+    } catch {
+      // ignore
+    }
+    return true
+  })
+
+  ipcMain.handle('app-window-list', async () => {
+    try {
+      const scriptPath = path.join(process.cwd(), 'scripts', 'window_list.swift')
+      const result = await execFileAsync('swift', [scriptPath])
+      logLine('app-window-list-raw', { sample: result.stdout.slice(0, 800) })
+      const parsed = JSON.parse(result.stdout) as {
+        apps?: Array<{ name: string; bundleId: string }>
+        windows?: Array<{ appName: string; title: string; id: string | number; x?: string; y?: string; w?: string; h?: string; displayIndex?: string; displayX?: string; displayY?: string; displayW?: string; displayH?: string }>
+      }
+      const apps = Array.isArray(parsed.apps) ? parsed.apps : []
+      const windows = Array.isArray(parsed.windows)
+        ? parsed.windows
+            .map((win) => ({
+              appName: win.appName,
+              title: win.title,
+              id: typeof win.id === 'number' ? String(win.id) : win.id,
+              x: win.x ?? '',
+              y: win.y ?? '',
+              w: win.w ?? '',
+              h: win.h ?? '',
+              displayIndex: win.displayIndex ?? '',
+              displayX: win.displayX ?? '',
+              displayY: win.displayY ?? '',
+              displayW: win.displayW ?? '',
+              displayH: win.displayH ?? '',
+            }))
+            .filter((win) => win.appName && win.id)
+        : []
+      logLine('app-window-list-summary', {
+        apps: apps.length,
+        windows: windows.length,
+        windowSample: windows.slice(0, 5),
+      })
+      return { apps, windows }
+    } catch (error) {
+      logLine('app-window-list-error', { message: (error as Error).message })
+      return { apps: [], windows: [] }
+    }
   })
 
   ipcMain.handle('cards-update', async (_event, cards: CardMeta[]) => {
