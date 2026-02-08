@@ -69,8 +69,10 @@ type ScreenshotCard = {
 type AppProxyCard = {
   id: string
   fileUrl: string
+  filePath?: string
   label: string
   appName: string
+  bundleId?: string
   x: number
   y: number
 }
@@ -223,7 +225,7 @@ function HudOverlay({
       : undefined
     const result = await ipcRenderer.invoke('window-capture-temp', { windowId: win.id, label, rect, display })
     if (result?.fileUrl) {
-      const next = [{ id: result.id, fileUrl: result.fileUrl, label, appName: win.appName, x: 0, y: 0 }, ...appCards]
+      const next = [{ id: result.id, fileUrl: result.fileUrl, filePath: result.filePath, label, appName: win.appName, bundleId: appList.find((app) => app.name === win.appName)?.bundleId, x: 0, y: 0 }, ...appCards]
       setAppCards(next)
       setActiveAppCardId(result.id)
     }
@@ -231,6 +233,20 @@ function HudOverlay({
 
   const handleAppCardToggle = (id: string) => {
     setActiveAppCardId((prev) => (prev === id ? null : id))
+  }
+
+  const handleAppCardDelete = async (card: AppProxyCard) => {
+    setAppCards((prev) => prev.filter((item) => item.id !== card.id))
+    if (activeAppCardId === card.id) {
+      setActiveAppCardId(null)
+    }
+    await ipcRenderer.invoke('app-card-delete', { filePath: card.filePath })
+  }
+
+  const handleAppActivate = async (card: AppProxyCard) => {
+    if (!card.bundleId) return
+    await ipcRenderer.invoke('app-activate', { bundleId: card.bundleId })
+    await ipcRenderer.invoke('app-move-to-hud', { bundleId: card.bundleId })
   }
 
   const handleAppCardDragStart = (id: string, event: React.PointerEvent) => {
@@ -1188,16 +1204,34 @@ function HudOverlay({
                   ['--card-y' as never]: `${card.y}px`,
                 }}
               >
-                <div
-                  className="hud-app-proxy-grab"
-                  onPointerDown={(event) => handleAppCardDragStart(card.id, event)}
-                  onClick={() => handleAppCardToggle(card.id)}
-                >
-                  {card.appName}
+              <div
+                className="hud-app-proxy-grab"
+                onPointerDown={(event) => handleAppCardDragStart(card.id, event)}
+                onClick={() => handleAppCardToggle(card.id)}
+              >
+                {card.appName}
+              </div>
+              {isActive && (
+                <div className="hud-app-proxy-actions">
+                  <button
+                    className="hud-app-proxy-action"
+                    type="button"
+                    onClick={() => handleAppActivate(card)}
+                  >
+                    OPEN
+                  </button>
+                  <button
+                    className="hud-app-proxy-action is-danger"
+                    type="button"
+                    onClick={() => handleAppCardDelete(card)}
+                  >
+                    DELETE
+                  </button>
                 </div>
-                <button className="hud-app-proxy-body" type="button" onClick={() => handleAppCardToggle(card.id)}>
-                  <img src={card.fileUrl} alt={card.label} draggable={false} />
-                </button>
+              )}
+              <button className="hud-app-proxy-body" type="button" onClick={() => handleAppCardToggle(card.id)}>
+                <img src={card.fileUrl} alt={card.label} draggable={false} />
+              </button>
               </div>
             )
           })}

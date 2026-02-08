@@ -233,6 +233,11 @@ logLine('user-data-path', { path: app.getPath('userData') })
 const cardsDir = path.join(app.getPath('userData'), 'cards')
 const cardsJsonPath = path.join(cardsDir, 'cards.json')
 const appCardsDir = path.join(app.getPath('userData'), 'app_cards')
+const getHudDisplayBounds = () => {
+  const displays = screen.getAllDisplays()
+  const target = hudDisplayId ? displays.find((d) => d.id === hudDisplayId) : displays[0]
+  return target?.bounds ?? displays[0]?.bounds ?? { x: 0, y: 0, width: 0, height: 0 }
+}
 
 type CardMeta = {
   id: string
@@ -841,7 +846,7 @@ function createWindow() {
     }
     const fileUrl = pathToFileURL(filePath).toString()
     logLine('window-capture-temp-ok', { filePath })
-    return { id, fileUrl, label }
+    return { id, fileUrl, filePath, label }
   })
 
   ipcMain.handle('app-cards-clear', async () => {
@@ -854,6 +859,48 @@ function createWindow() {
       // ignore
     }
     return true
+  })
+
+  ipcMain.handle('app-card-delete', async (_event, payload: { filePath?: string }) => {
+    if (payload?.filePath) {
+      try {
+        await fsPromises.unlink(payload.filePath)
+      } catch {
+        // ignore
+      }
+    }
+    return true
+  })
+
+  ipcMain.handle('app-activate', async (_event, payload: { bundleId: string }) => {
+    try {
+      const scriptPath = path.join(process.cwd(), 'scripts', 'window_list.swift')
+      await execFileAsync('swift', [scriptPath, 'activate', payload.bundleId])
+      return true
+    } catch (error) {
+      logLine('app-activate-error', { message: (error as Error).message })
+      return false
+    }
+  })
+
+  ipcMain.handle('app-move-to-hud', async (_event, payload: { bundleId: string }) => {
+    try {
+      const scriptPath = path.join(process.cwd(), 'scripts', 'window_list.swift')
+      const bounds = getHudDisplayBounds()
+      await execFileAsync('swift', [
+        scriptPath,
+        'move',
+        payload.bundleId,
+        String(bounds.x),
+        String(bounds.y),
+        String(bounds.width),
+        String(bounds.height),
+      ])
+      return true
+    } catch (error) {
+      logLine('app-move-error', { message: (error as Error).message })
+      return false
+    }
   })
 
   ipcMain.handle('app-window-list', async () => {

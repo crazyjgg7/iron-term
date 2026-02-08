@@ -77,6 +77,12 @@ Date: 2026-02-06
 - Light hover/active feedback on card controls to reduce misclicks
 - Smooth scale animation when toggling small/large
 
+### App Switch Proxy Cards — Pending Interaction Rules
+- When a card is expanded: it should be **non-draggable**
+- When a card is collapsed: it should be **draggable**
+- Expand animation should use the **collapsed position as the anchor**
+- Expanded size target: **500 × 380**
+
 ## 🔧 Known Issues / Risks
 - Web Speech API not used; Aliyun NLS requires valid keys/token
 - tmux selector depends on tmux server visibility

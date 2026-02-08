@@ -382,6 +382,8 @@ body,
   gap: 12px;
   overflow-x: auto;
   padding-bottom: 6px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 200, 255, 0.6) transparent;
 }
 
 .hud-app-card {
@@ -440,6 +442,26 @@ body,
   gap: 4px;
   max-height: 120px;
   overflow: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 200, 255, 0.6) transparent;
+}
+
+.hud-app-strip::-webkit-scrollbar,
+.hud-app-windows::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+
+.hud-app-strip::-webkit-scrollbar-thumb,
+.hud-app-windows::-webkit-scrollbar-thumb {
+  background: rgba(120, 200, 255, 0.6);
+  border-radius: 999px;
+}
+
+.hud-app-strip::-webkit-scrollbar-track,
+.hud-app-windows::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
 }
 
 .hud-app-window {
@@ -485,6 +507,7 @@ body,
       calc(var(--stack-y, 0px) + var(--card-y, 0px))
     )
     scale(0.85);
+  transform-origin: top left;
   display: flex;
   flex-direction: column;
 }
@@ -508,6 +531,31 @@ body,
   user-select: none;
 }
 
+.hud-app-proxy-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin: 6px 8px 0;
+}
+
+.hud-app-proxy-action {
+  padding: 2px 6px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  border: 1px solid rgba(120, 200, 255, 0.6);
+  background: rgba(0, 0, 0, 0.35);
+  color: #a7dfff;
+  border-radius: 4px;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(120, 200, 255, 0.35);
+}
+
+.hud-app-proxy-action.is-danger {
+  border-color: rgba(255, 120, 120, 0.6);
+  color: #ffb3b3;
+  box-shadow: 0 0 8px rgba(255, 120, 120, 0.35);
+}
+
 .hud-app-proxy-body {
   flex: 1;
   background: transparent;
@@ -525,7 +573,11 @@ body,
 }
 
 .hud-app-proxy.is-active {
-  transform: translate(calc(50vw - 300px), calc(50vh - 190px)) scale(3.333, 3.167);
+  transform: translate(
+      calc(var(--stack-x, 0px) + var(--card-x, 0px)),
+      calc(var(--stack-y, 0px) + var(--card-y, 0px))
+    )
+    scale(3.922, 3.726);
   border-color: rgba(120, 200, 255, 0.95);
   box-shadow: 0 0 24px rgba(120, 200, 255, 0.9);
   z-index: 8;
@@ -536,7 +588,7 @@ body,
       calc(var(--stack-x, 0px) + var(--card-x, 0px)),
       calc(var(--stack-y, 0px) + var(--card-y, 0px))
     )
-    scale(3.333, 3.167);
+    scale(3.922, 3.726);
 }
 
 .hud-alert-actions {

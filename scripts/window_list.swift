@@ -1,6 +1,18 @@
 import Foundation
 import AppKit
 
+let screens = NSScreen.screens
+let displayMeta: [[String: String]] = screens.enumerated().map { idx, screen in
+  let frame = screen.frame
+  return [
+    "index": String(idx + 1),
+    "x": String(Int(frame.origin.x)),
+    "y": String(Int(frame.origin.y)),
+    "w": String(Int(frame.size.width)),
+    "h": String(Int(frame.size.height))
+  ]
+}
+
 let regularApps = NSWorkspace.shared.runningApplications
   .filter { !$0.isHidden && !$0.isTerminated && $0.activationPolicy == .regular }
 
@@ -13,21 +25,45 @@ let apps = regularApps
   }
   .filter { !$0["name", default: ""].isEmpty }
 
+let args = CommandLine.arguments
+if args.count >= 3 && args[1] == "activate" {
+  let bundleId = args[2]
+  if let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first {
+    app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+  }
+  exit(0)
+}
+
+if args.count >= 7 && args[1] == "move" {
+  let bundleId = args[2]
+  let displayX = Int(args[3]) ?? 0
+  let displayY = Int(args[4]) ?? 0
+  let displayW = Int(args[5]) ?? 0
+  let displayH = Int(args[6]) ?? 0
+  let appName = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first?.localizedName ?? bundleId
+  let targetX = displayX + max(0, (displayW - 900) / 2)
+  let targetY = displayY + max(0, (displayH - 600) / 2)
+  let script = """
+  tell application "System Events"
+    tell application process "\(appName)"
+      try
+        set frontmost to true
+        set position of front window to {\(targetX), \(targetY)}
+      end try
+    end tell
+  end tell
+  """
+  let process = Process()
+  process.launchPath = "/usr/bin/osascript"
+  process.arguments = ["-e", script]
+  try? process.run()
+  process.waitUntilExit()
+  exit(0)
+}
+
 let regularAppNames = Set(regularApps.compactMap { $0.localizedName })
 
 let windowInfo = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
-
-let screens = NSScreen.screens
-let displayMeta: [[String: String]] = screens.enumerated().map { idx, screen in
-  let frame = screen.frame
-  return [
-    "index": String(idx + 1),
-    "x": String(Int(frame.origin.x)),
-    "y": String(Int(frame.origin.y)),
-    "w": String(Int(frame.size.width)),
-    "h": String(Int(frame.size.height))
-  ]
-}
 
 let windows: [[String: String]] = windowInfo.compactMap { info in
   let ownerName = info[kCGWindowOwnerName as String] as? String ?? ""
