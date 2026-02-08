@@ -91,10 +91,7 @@ function HudOverlay({
   const { ipcRenderer } = window.require('electron')
   const os = window.require('os')
 
-  const [logs, setLogs] = useState<string[]>([
-    '[SYS] Boot sequence initialized',
-    '[HUD] PTY link pending...',
-  ])
+  const [logs, setLogs] = useState<string[]>([])
   const [alertActive, setAlertActive] = useState(false)
   const [alertMessage, setAlertMessage] = useState<string | null>(null)
   const [alertVisible, setAlertVisible] = useState(false)
@@ -324,7 +321,7 @@ function HudOverlay({
       const lines = data.lines ?? []
       if (lines.length === 0) return
 
-      setLogs(lines.slice(-24))
+      setLogs(lines.slice(-10))
 
       if (lines.some((line) => line.includes('ERROR') || line.includes('WARN'))) {
         setAlertActive(true)
@@ -912,7 +909,11 @@ function HudOverlay({
   }
 
   return (
-    <div className="hud-root" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
+    <div
+      className={`hud-root ${layoutConfig.modeClass} ${hudInteractive ? 'hud-interactive' : 'hud-pass'}`}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       {layoutConfig.showLeftStream && (
         <div
           className={`hud-panel hud-panel-left ${layoutConfig.leftWidthClass ?? ''} ${alertActive ? 'hud-alert' : ''}`}
@@ -1266,6 +1267,11 @@ function HudOverlay({
 function App() {
   const [preset, setPreset] = useState<HudPreset>('daily')
   const [hudInteractive, setHudInteractive] = useState(true)
+  const [presetHudMode, setPresetHudMode] = useState<Record<HudPreset, boolean>>({
+    daily: true,
+    entertainment: false,
+    coding: true,
+  })
 
   const presets: Record<HudPreset, HudLayoutConfig> = {
     daily: {
@@ -1320,6 +1326,10 @@ function App() {
   }, [preset])
 
   useEffect(() => {
+    setHudInteractive(presetHudMode[preset])
+  }, [preset, presetHudMode])
+
+  useEffect(() => {
     const handlePresetHotkey = (event: KeyboardEvent) => {
       if (!event.altKey) return
 
@@ -1342,18 +1352,34 @@ function App() {
 
     const handleHudToggle = (event: KeyboardEvent) => {
       if (!(event.metaKey && event.shiftKey && event.key.toLowerCase() === 'm')) return
-      setHudInteractive((prev) => !prev)
+      setHudInteractive((prev) => {
+        const next = !prev
+        setPresetHudMode((modes) => ({ ...modes, [preset]: next }))
+        return next
+      })
     }
 
     const handleHudToggleRequest = () => {
-      setHudInteractive((prev) => !prev)
+      setHudInteractive((prev) => {
+        const next = !prev
+        setPresetHudMode((modes) => ({ ...modes, [preset]: next }))
+        return next
+      })
+    }
+
+    const handlePresetChange = (_event: unknown, next: HudPreset) => {
+      if (next === 'daily' || next === 'entertainment' || next === 'coding') {
+        setPreset(next)
+      }
     }
 
     window.addEventListener('keydown', handleHudToggle)
     ipcRenderer.on('hud-toggle-request', handleHudToggleRequest)
+    ipcRenderer.on('preset-change', handlePresetChange)
     return () => {
       window.removeEventListener('keydown', handleHudToggle)
       ipcRenderer.removeListener('hud-toggle-request', handleHudToggleRequest)
+      ipcRenderer.removeListener('preset-change', handlePresetChange)
     }
   }, [])
 
@@ -1384,7 +1410,10 @@ function App() {
           </div>
         )}
         <div className="hud-preset">
-          MODE: {preset.toUpperCase()} (OPTION+1/2/3) · HUD: {hudInteractive ? 'INTERACTIVE' : 'PASS-THROUGH'}
+          MODE: {preset.toUpperCase()} (OPTION+1/2/3) · HUD:{' '}
+          <span className={hudInteractive ? 'hud-interactive-text' : ''}>
+            {hudInteractive ? 'INTERACTIVE' : 'PASS-THROUGH'}
+          </span>
         </div>
       </div>
     </>

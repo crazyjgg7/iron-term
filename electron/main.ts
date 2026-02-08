@@ -1101,6 +1101,7 @@ app.on('window-all-closed', () => {
     clearInterval(tmuxTimer)
     tmuxTimer = null
   }
+  globalShortcut.unregisterAll()
   controlWin = null
   win = null
 })
@@ -1118,6 +1119,17 @@ app.whenReady().then(() => {
   // Global voice toggle (fallback when HUD doesn't have focus)
   globalShortcut.register('Option+V', () => {
     win?.webContents.send('voice-toggle-request')
+  })
+
+  // Global preset shortcuts so they still work in pass-through mode
+  globalShortcut.register('Option+1', () => {
+    win?.webContents.send('preset-change', 'daily')
+  })
+  globalShortcut.register('Option+2', () => {
+    win?.webContents.send('preset-change', 'entertainment')
+  })
+  globalShortcut.register('Option+3', () => {
+    win?.webContents.send('preset-change', 'coding')
   })
 
 })

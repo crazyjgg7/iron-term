@@ -635,6 +635,14 @@ body,
   margin-bottom: 8px;
 }
 
+.hud-preset .hud-interactive-text {
+  color: #f6fbff;
+  text-shadow:
+    0 0 4px rgba(255, 255, 255, 0.9),
+    0 0 10px rgba(255, 255, 255, 0.6),
+    0 0 16px rgba(255, 43, 43, 0.45);
+}
+
 .hud-line {
   font-size: 12px;
   letter-spacing: 1px;
